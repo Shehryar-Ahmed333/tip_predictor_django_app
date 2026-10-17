@@ -1,0 +1,6 @@
+Django>=5.2
+xgboost>=2.0
+scikit-learn
+pandas
+joblib
+numpy

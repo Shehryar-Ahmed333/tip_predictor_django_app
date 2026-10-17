@@ -1,0 +1,137 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tip Predictor</title>
+  <meta name="description" content="Enter a restaurant bill and see the tip an XGBoost model expects, printed on a live receipt.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'ml_app/style.css' %}">
+</head>
+<body>
+  <header class="top">
+    <span class="brand">Tip Predictor</span>
+    <a class="top-link" href="#model">How the model performs</a>
+  </header>
+
+  <main>
+    <section class="workbench" aria-labelledby="h1">
+      <div class="slip">
+        <h1 id="h1">What will this table tip?</h1>
+        <p class="lede">Describe the meal. The model estimates the tip from 244 real restaurant checks.</p>
+
+        <form id="tip-form" action="{% url 'predict' %}" method="post" novalidate>
+          {% csrf_token %}
+
+          <div class="field">
+            <label for="total_bill">Total bill</label>
+            <div class="money">
+              <span aria-hidden="true">$</span>
+              <input id="total_bill" name="total_bill" type="number" inputmode="decimal" min="1" max="500" step="0.01" value="35.00" required>
+            </div>
+            <input class="slider" id="bill_range" type="range" min="3" max="100" step="0.5" value="35" aria-label="Total bill slider">
+            <p class="error" data-error="total_bill" role="alert"></p>
+          </div>
+
+          <div class="field">
+            <label for="size">Party size</label>
+            <div class="stepper">
+              <button type="button" data-step="-1" aria-label="Fewer guests">&minus;</button>
+              <input id="size" name="size" type="number" min="1" max="12" value="2" required>
+              <button type="button" data-step="1" aria-label="More guests">+</button>
+            </div>
+            <p class="error" data-error="size" role="alert"></p>
+          </div>
+
+          <fieldset class="field">
+            <legend>Day</legend>
+            <div class="seg" role="radiogroup">
+              {% for value, label in form.fields.day.choices %}
+              <label><input type="radio" name="day" value="{{ value }}" {% if value == 'Sat' %}checked{% endif %}><span>{{ label|slice:":3" }}</span></label>
+              {% endfor %}
+            </div>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend>Meal</legend>
+            <div class="seg" role="radiogroup">
+              {% for value, label in form.fields.time.choices %}
+              <label><input type="radio" name="time" value="{{ value }}" {% if value == 'Dinner' %}checked{% endif %}><span>{{ label }}</span></label>
+              {% endfor %}
+            </div>
+          </fieldset>
+
+          <div class="two">
+            <fieldset class="field">
+              <legend>Payer</legend>
+              <div class="seg" role="radiogroup">
+                {% for value, label in form.fields.sex.choices %}
+                <label><input type="radio" name="sex" value="{{ value }}" {% if value == 'Male' %}checked{% endif %}><span>{{ label }}</span></label>
+                {% endfor %}
+              </div>
+            </fieldset>
+            <fieldset class="field">
+              <legend>Smoking section</legend>
+              <div class="seg" role="radiogroup">
+                {% for value, label in form.fields.smoker.choices %}
+                <label><input type="radio" name="smoker" value="{{ value }}" {% if value == 'No' %}checked{% endif %}><span>{{ label }}</span></label>
+                {% endfor %}
+              </div>
+            </fieldset>
+          </div>
+
+          <button class="go" type="submit">Predict tip</button>
+        </form>
+      </div>
+
+      <aside class="receipt-wrap" aria-live="polite" aria-label="Predicted tip receipt">
+        <div class="receipt" id="receipt">
+          <div class="receipt-head">
+            <strong>THE CHECK</strong>
+            <span id="r-meta">Saturday dinner</span>
+          </div>
+          <div class="tear"></div>
+          <dl class="lines">
+            <div><dt>Bill</dt><dd id="r-bill">$35.00</dd></div>
+            <div><dt>Guests</dt><dd id="r-size">2</dd></div>
+          </dl>
+          <div class="tip-line">
+            <span>Predicted tip</span>
+            <strong id="r-tip">$0.00</strong>
+          </div>
+          <dl class="lines">
+            <div><dt>Share of bill</dt><dd id="r-pct">&ndash;</dd></div>
+            <div><dt>Per guest</dt><dd id="r-pp">&ndash;</dd></div>
+            <div class="grand"><dt>Total to pay</dt><dd id="r-total">&ndash;</dd></div>
+          </dl>
+
+          <div class="range" aria-hidden="true">
+            <div class="range-track"><div class="range-band" id="r-band"></div><div class="range-dot" id="r-dot"></div></div>
+            <div class="range-scale"><span>$0</span><span>$10</span></div>
+          </div>
+          <p class="range-note" id="r-range">Typical miss of the model: about $0.67 either way.</p>
+          <p class="status" id="status" role="status"></p>
+          <div class="tear bottom"></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="model" id="model" aria-labelledby="h2">
+      <h2 id="h2">How far to trust it</h2>
+      <p class="model-lead">Tips depend on a lot more than six facts about a meal, so the model is useful as an estimate and not a promise.</p>
+      <div class="facts">
+        <div><b>${{ mae|floatformat:2 }}</b><p>Average miss on meals the model had never seen (mean absolute error).</p></div>
+        <div><b>{{ r2|floatformat:2 }}</b><p>R&sup2; on the same hold-out set. About 41% of the variation in tips is explained.</p></div>
+        <div><b>XGBoost</b><p>Chosen over Random Forest, which scored R&sup2; 0.23 and an average miss of $0.78.</p></div>
+      </div>
+      <p class="stack">Built with Django, XGBoost, pandas and scikit-learn. Trained on the public <em>tips</em> dataset:</p>
+    </section>
+  </main>
+
+  <footer class="foot">ShehrYar Ahmed&middot; Data Analyst & Data Scientist &amp; Machine Learning Engineer</footer>
+
+  <script src="{% static 'ml_app/app.js' %}"></script>
+</body>
+</html>
